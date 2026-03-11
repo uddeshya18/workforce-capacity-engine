@@ -110,15 +110,31 @@ if uploaded_files:
     with col_main:
         st.header("📊 Projected Requirements")
         
-        # Calculate Logic First to get Total Hours for Utilization
-        temp_results = []
+        results = []
         total_hours_needed = 0
         for wf_name in WF_MAPPING.values():
             aht = final_metrics.loc[final_metrics['Mapped_WF'] == wf_name, aht_col].values[0]
             vol = march_vols[wf_name]
             total_h = (vol * aht) / 3600
             total_hours_needed += total_h
-            temp_results.append({"wf": wf_name, "aht": aht, "vol": vol, "hrs": total_h})
+            man_days = total_h / prod_h
+            
+            # --- FIXED INDEPENDENT LOGIC ---
+            # Row only turns Critical if THIS SPECIFIC TASK exceeds team's weekly man-days
+            is_row_critical = man_days > (qas * 5) 
+            status_text = "Critical" if is_row_critical else "Safe"
+            emoji = "🚨 " if is_row_critical else "✅ "
+            status_class = "status-critical" if is_row_critical else "status-safe"
+
+            results.append({
+                "Workflow": wf_name,
+                "AHT (Sec)": round(aht, 2),
+                "Volume": vol,
+                "Hours Needed": round(total_h, 2),
+                "Man-Days Needed": round(man_days, 2),
+                "Status": f'<span class="{status_class}">{emoji}{status_text}</span>',
+                "Plain_Status": status_text
+            })
 
         util_pct = (total_hours_needed / weekly_team_hours_limit * 100) if weekly_team_hours_limit > 0 else 0
 
@@ -128,36 +144,16 @@ if uploaded_files:
         m2.metric("Team Capacity (Wk)", f"{weekly_team_hours_limit:.2f}")
         m3.metric("Utilization", f"{util_pct:.2f}%")
 
-        # Table Data Generation with Correct Status Logic
-        final_table_data = []
-        for item in temp_results:
-            man_days = item['hrs'] / prod_h
-            # Row is critical IF the whole plan is over capacity OR this specific row exceeds team limits
-            is_critical = util_pct > 100 or man_days > (qas * 5)
-            status_text = "Critical" if is_critical else "Safe"
-            emoji = "🚨 " if is_critical else "✅ "
-            status_class = "status-critical" if is_critical else "status-safe"
-
-            final_table_data.append({
-                "Workflow": item['wf'],
-                "AHT (Sec)": round(item['aht'], 2),
-                "Volume": item['vol'],
-                "Hours Needed": round(item['hrs'], 2),
-                "Man-Days Needed": round(man_days, 2),
-                "Status": f'<span class="{status_class}">{emoji}{status_text}</span>',
-                "Plain_Status": status_text
-            })
-
-        res_df = pd.DataFrame(final_table_data)
+        res_df = pd.DataFrame(results)
         st.write(res_df.drop(columns=['Plain_Status']).to_html(index=False, escape=False, classes="dashboard-table"), unsafe_allow_html=True)
         
-        st.write("") # Spacer
+        st.write("") 
 
-        # --- THE STATUS TAB BANNER ---
+        # --- OVERALL PLAN VERDICT BANNER ---
         if util_pct > 100:
-            st.markdown(f'<div class="status-banner banner-error">⚠️ Over Capacity: Utilization is at {util_pct:.2f}%. Reduce volume or increase hours.</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="status-banner banner-error">⚠️ Over Capacity: Total utilization is {util_pct:.2f}%. Load is not balanced.</div>', unsafe_allow_html=True)
         else:
-            st.markdown(f'<div class="status-banner banner-success">🟢 Healthy Plan: Utilization is at {util_pct:.2f}%. Load is balanced.</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="status-banner banner-success">🟢 Healthy Plan: Total utilization is {util_pct:.2f}%. Team can handle this load.</div>', unsafe_allow_html=True)
             
         # --- EXPORT BUTTON ---
         export_df = res_df.copy()
