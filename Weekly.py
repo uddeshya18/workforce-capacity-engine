@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import re
 
 # --- CONFIGURATION & PREMIUM UI ---
 st.set_page_config(page_title="Weekly QA Command Center", layout="wide")
@@ -20,15 +19,13 @@ st.markdown("""
     }
     [data-testid="stMetricValue"] { color: #38bdf8 !important; font-size: 2rem !important; }
 
-    /* Standard Sized Left-Aligned Button */
-    div.stDownloadButton {
-        text-align: left;
-    }
+    /* Standard Sized Left-Aligned Blue Button */
+    div.stDownloadButton { text-align: left; margin-top: 10px; }
     div.stDownloadButton > button {
         background-color: #0ea5e9 !important;
         color: white !important;
         border-radius: 6px !important;
-        width: auto !important; /* Makes it a normal sized button */
+        width: auto !important;
         padding: 8px 20px !important;
         font-weight: bold !important;
         border: none !important;
@@ -47,6 +44,18 @@ st.markdown("""
     .dashboard-table td { padding: 12px 15px; border-bottom: 1px solid #334155; }
     .status-safe { color: #4ade80; font-weight: bold; }
     .status-critical { color: #f87171; font-weight: bold; }
+
+    /* Status Banner Tab */
+    .status-banner {
+        padding: 15px;
+        border-radius: 8px;
+        margin-bottom: 10px;
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+    }
+    .banner-success { background-color: rgba(22, 163, 74, 0.2); border: 1px solid #22c55e; color: #4ade80 !important; }
+    .banner-error { background-color: rgba(220, 38, 38, 0.2); border: 1px solid #ef4444; color: #f87171 !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -76,7 +85,7 @@ def load_and_clean(files):
 st.title("🛡️ Weekly QA Command Center")
 
 with st.expander("📂 Step 1: Upload Historical Metrics (Jan/Feb)", expanded=True):
-    uploaded_files = st.file_uploader("Drop Mercury CSV files", type="csv", accept_multiple_files=True)
+    uploaded_files = st.file_uploader("Upload Mercury CSV files", type="csv", accept_multiple_files=True)
 
 if uploaded_files:
     df, aht_col = load_and_clean(uploaded_files)
@@ -96,60 +105,67 @@ if uploaded_files:
         
         st.write("---")
         st.write("**Target Weekly Volumes**")
-        march_vols = {wf: st.number_input(f"{wf}", value=0, step=100, key=f"in_{wf}") for wf in WF_MAPPING.values()}
+        march_vols = {wf: st.number_input(f"{wf}", value=0, step=100, key=f"v_{wf}") for wf in WF_MAPPING.values()}
 
     with col_main:
         st.header("📊 Projected Requirements")
-        results = []
-        total_hours_needed = 0
         
+        # Calculate Logic First to get Total Hours for Utilization
+        temp_results = []
+        total_hours_needed = 0
         for wf_name in WF_MAPPING.values():
             aht = final_metrics.loc[final_metrics['Mapped_WF'] == wf_name, aht_col].values[0]
             vol = march_vols[wf_name]
             total_h = (vol * aht) / 3600
             total_hours_needed += total_h
-            man_days = total_h / prod_h
-            
-            # YOUR STATUS LOGIC
-            status_val = "Safe" if man_days <= (qas * 5) else "Critical"
-            emoji = "✅ " if status_val == "Safe" else "🚨 "
-            status_class = "status-safe" if status_val == "Safe" else "status-critical"
-            
-            results.append({
-                "Workflow": wf_name,
-                "AHT (Sec)": round(aht, 2),
-                "Volume": vol,
-                "Hours Needed": round(total_h, 2),
-                "Man-Days Needed": round(man_days, 2),
-                "Status": f'<span class="{status_class}">{emoji}{status_val}</span>',
-                "Plain_Status": status_val # Hidden column for CSV export
-            })
-        
+            temp_results.append({"wf": wf_name, "aht": aht, "vol": vol, "hrs": total_h})
+
+        util_pct = (total_hours_needed / weekly_team_hours_limit * 100) if weekly_team_hours_limit > 0 else 0
+
+        # Summary Metrics Cards
         m1, m2, m3 = st.columns(3)
         m1.metric("Total Hours Needed", f"{total_hours_needed:.2f}")
         m2.metric("Team Capacity (Wk)", f"{weekly_team_hours_limit:.2f}")
-        util_pct = (total_hours_needed / weekly_team_hours_limit * 100) if weekly_team_hours_limit > 0 else 0
         m3.metric("Utilization", f"{util_pct:.2f}%")
+
+        # Table Data Generation with Correct Status Logic
+        final_table_data = []
+        for item in temp_results:
+            man_days = item['hrs'] / prod_h
+            # Row is critical IF the whole plan is over capacity OR this specific row exceeds team limits
+            is_critical = util_pct > 100 or man_days > (qas * 5)
+            status_text = "Critical" if is_critical else "Safe"
+            emoji = "🚨 " if is_critical else "✅ "
+            status_class = "status-critical" if is_critical else "status-safe"
+
+            final_table_data.append({
+                "Workflow": item['wf'],
+                "AHT (Sec)": round(item['aht'], 2),
+                "Volume": item['vol'],
+                "Hours Needed": round(item['hrs'], 2),
+                "Man-Days Needed": round(man_days, 2),
+                "Status": f'<span class="{status_class}">{emoji}{status_text}</span>',
+                "Plain_Status": status_text
+            })
+
+        res_df = pd.DataFrame(final_table_data)
+        st.write(res_df.drop(columns=['Plain_Status']).to_html(index=False, escape=False, classes="dashboard-table"), unsafe_allow_html=True)
         
-        res_df = pd.DataFrame(results)
-        # Show table WITHOUT the hidden Plain_Status column
-        display_df = res_df.drop(columns=['Plain_Status'])
-        st.write(display_df.to_html(index=False, escape=False, classes="dashboard-table"), unsafe_allow_html=True)
-        
-        st.write("---")
-        
-        # CLEAN CSV EXPORT LOGIC
-        # We create a specific dataframe for export that doesn't have HTML tags
+        st.write("") # Spacer
+
+        # --- THE STATUS TAB BANNER ---
+        if util_pct > 100:
+            st.markdown(f'<div class="status-banner banner-error">⚠️ Over Capacity: Utilization is at {util_pct:.2f}%. Reduce volume or increase hours.</div>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="status-banner banner-success">🟢 Healthy Plan: Utilization is at {util_pct:.2f}%. Load is balanced.</div>', unsafe_allow_html=True)
+            
+        # --- EXPORT BUTTON ---
         export_df = res_df.copy()
         export_df['Status'] = export_df['Plain_Status']
         export_df = export_df.drop(columns=['Plain_Status'])
-        
-        # utf-8-sig makes it open perfectly in Excel without weird characters
         csv_data = export_df.to_csv(index=False).encode('utf-8-sig')
         
-        st.download_button(
-            label="📥 Export Report",
-            data=csv_data,
-            file_name="QA_Weekly_Plan.csv",
-            mime="text/csv"
-        )
+        st.download_button(label="📥 Export Report", data=csv_data, file_name="Weekly_Plan.csv", mime="text/csv")
+
+else:
+    st.info("👋 Upload Mercury files to begin.")
