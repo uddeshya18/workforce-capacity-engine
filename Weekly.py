@@ -1,21 +1,43 @@
 import streamlit as st
 import pandas as pd
 
-# --- PROFESSIONAL SLATE THEME (Better than pure black/white) ---
+# --- STABLE DARK MODE CONFIG ---
 st.set_page_config(page_title="QA Command Center", layout="wide")
 
 st.markdown("""
     <style>
-    .stApp { background-color: #1e293b !important; } /* Deep Slate Grey */
-    h1, h2, h3, p, label, span, div { color: #ffffff !important; font-weight: 500; }
+    .stApp { background-color: #0f172a !important; } /* Darker Slate */
+    h1, h2, h3, p, label, span, div { color: #ffffff !important; }
+    
+    /* Metrics Styling */
     div[data-testid="stMetric"] {
-        background-color: #334155 !important;
-        border: 1px solid #475569 !important;
+        background-color: #1e293b !important;
+        border: 2px solid #334155 !important;
         border-radius: 10px;
+        padding: 15px;
     }
-    [data-testid="stMetricValue"] { color: #38bdf8 !important; } /* Sky Blue Numbers */
-    .stTable { background-color: #1e293b !important; color: #ffffff !important; }
-    th { color: #94a3b8 !important; }
+    [data-testid="stMetricValue"] { color: #38bdf8 !important; font-weight: bold; }
+    
+    /* STABLE HTML TABLE STYLING - This replaces the broken interactive tables */
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        color: white;
+        background-color: #1e293b;
+        border-radius: 8px;
+        overflow: hidden;
+    }
+    th {
+        background-color: #334155;
+        color: #38bdf8;
+        text-align: left;
+        padding: 12px;
+    }
+    td {
+        padding: 10px;
+        border-bottom: 1px solid #334155;
+    }
+    tr:hover { background-color: #2d3e50; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -44,7 +66,7 @@ def load_data(files):
 
 st.title("🛡️ QA Weekly Command Center")
 
-files = st.file_uploader("Upload Mercury CSV Files", type="csv", accept_multiple_files=True)
+files = st.file_uploader("Upload Historical CSVs", type="csv", accept_multiple_files=True)
 
 if files:
     df, aht_col = load_data(files)
@@ -53,7 +75,6 @@ if files:
     all_wfs = pd.DataFrame({'Mapped_WF': list(WF_MAPPING.values())}).drop_duplicates()
     final_metrics = all_wfs.merge(metrics, on='Mapped_WF', how='left').fillna(overall_avg)
 
-    # TWO-COLUMN LAYOUT
     col_in, col_out = st.columns([1, 2.5])
     
     with col_in:
@@ -61,7 +82,6 @@ if files:
         qas = st.number_input("Total QAs", min_value=1, value=7)
         prod_h = st.slider("Productive Hours/Day", 4.0, 8.0, 6.5, step=0.5)
         weekly_cap = qas * prod_h * 5
-        
         st.write("---")
         vols = {wf: st.number_input(f"Vol: {wf}", value=0) for wf in WF_MAPPING.values()}
 
@@ -72,23 +92,27 @@ if files:
             aht = final_metrics.loc[final_metrics['Mapped_WF'] == wf, aht_col].values[0]
             hrs = (vols[wf] * aht) / 3600
             total_h += hrs
-            results.append({"Workflow": wf, "AHT": aht, "Vol": vols[wf], "Hrs": hrs})
+            results.append({
+                "Workflow": wf, 
+                "AHT": f"{aht:.2f}", 
+                "Volume": vols[wf], 
+                "Work (Hrs)": f"{hrs:.2f}",
+                "Man-Days": f"{(hrs/prod_h):.2f}",
+                "Status": "🚨 OVER" if (total_h / weekly_cap) > 1 else "✅ SAFE"
+            })
         
         util = (total_h / weekly_cap * 100) if weekly_cap > 0 else 0
-        
         m1, m2, m3 = st.columns(3)
-        m1.metric("Load (Hrs)", f"{total_h:.2f}")
-        m2.metric("Capacity (Hrs)", f"{weekly_cap:.2f}")
+        m1.metric("Required Hrs", f"{total_h:.2f}")
+        m2.metric("Available Hrs", f"{weekly_cap:.2f}")
         m3.metric("Utilization", f"{util:.2f}%")
         
+        # WE ARE USING st.write(df.to_html()) INSTEAD OF st.table()
+        # This is a bulletproof way to avoid that Red Box error
         res_df = pd.DataFrame(results)
-        res_df["Man-Days"] = (res_df["Hrs"] / prod_h).map(lambda x: f"{x:.2f}")
-        # Logic fix for status
-        res_df["Status"] = "🚨 Critical" if util > 100 else "✅ Safe"
+        st.write(res_df.to_html(index=False, escape=False), unsafe_allow_html=True)
         
-        st.dataframe(res_df, use_container_width=True) # Using dataframe instead of table to avoid red box
-        
-        st.download_button("📥 Download Weekly Report", res_df.to_csv(index=False), "Weekly_Plan.csv")
-
+        st.write("") # Spacer
+        st.download_button("📥 Download Report", res_df.to_csv(index=False), "Weekly_Plan.csv")
 else:
-    st.info("Please upload your Mercury CSV files.")
+    st.info("Upload your Mercury CSV files to get started.")
