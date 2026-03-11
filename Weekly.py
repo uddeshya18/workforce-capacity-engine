@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import re
 
 # --- CONFIGURATION & PREMIUM UI ---
 st.set_page_config(page_title="Weekly QA Command Center", layout="wide")
@@ -19,14 +20,17 @@ st.markdown("""
     }
     [data-testid="stMetricValue"] { color: #38bdf8 !important; font-size: 2rem !important; }
 
-    /* Premium Export Button */
+    /* Standard Sized Left-Aligned Button */
+    div.stDownloadButton {
+        text-align: left;
+    }
     div.stDownloadButton > button {
         background-color: #0ea5e9 !important;
         color: white !important;
-        border-radius: 8px !important;
-        width: 100% !important;
+        border-radius: 6px !important;
+        width: auto !important; /* Makes it a normal sized button */
+        padding: 8px 20px !important;
         font-weight: bold !important;
-        padding: 12px !important;
         border: none !important;
     }
 
@@ -69,9 +73,7 @@ def load_and_clean(files):
     df[aht_col] = pd.to_numeric(df[aht_col], errors='coerce')
     return df, aht_col
 
-# --- HEADER ---
 st.title("🛡️ Weekly QA Command Center")
-st.subheader("Monday Morning Planning & Capacity Projection")
 
 with st.expander("📂 Step 1: Upload Historical Metrics (Jan/Feb)", expanded=True):
     uploaded_files = st.file_uploader("Drop Mercury CSV files", type="csv", accept_multiple_files=True)
@@ -83,7 +85,7 @@ if uploaded_files:
     all_wfs = pd.DataFrame({'Mapped_WF': list(WF_MAPPING.values())}).drop_duplicates()
     final_metrics = all_wfs.merge(metrics, on='Mapped_WF', how='left').fillna(overall_avg)
 
-    st.markdown("---") # Replaced st.divider()
+    st.markdown("---")
     col_sidebar, col_main = st.columns([1, 2.5])
     
     with col_sidebar:
@@ -108,9 +110,10 @@ if uploaded_files:
             total_hours_needed += total_h
             man_days = total_h / prod_h
             
-            # --- YOUR EXACT STATUS LOGIC ---
-            status_val = "✅ Safe" if man_days <= (qas * 5) else "🚨 Critical"
-            status_class = "status-safe" if status_val == "✅ Safe" else "status-critical"
+            # YOUR STATUS LOGIC
+            status_val = "Safe" if man_days <= (qas * 5) else "Critical"
+            emoji = "✅ " if status_val == "Safe" else "🚨 "
+            status_class = "status-safe" if status_val == "Safe" else "status-critical"
             
             results.append({
                 "Workflow": wf_name,
@@ -118,32 +121,35 @@ if uploaded_files:
                 "Volume": vol,
                 "Hours Needed": round(total_h, 2),
                 "Man-Days Needed": round(man_days, 2),
-                "Status": f'<span class="{status_class}">{status_val}</span>'
+                "Status": f'<span class="{status_class}">{emoji}{status_val}</span>',
+                "Plain_Status": status_val # Hidden column for CSV export
             })
         
-        # Summary Cards
         m1, m2, m3 = st.columns(3)
         m1.metric("Total Hours Needed", f"{total_hours_needed:.2f}")
         m2.metric("Team Capacity (Wk)", f"{weekly_team_hours_limit:.2f}")
         util_pct = (total_hours_needed / weekly_team_hours_limit * 100) if weekly_team_hours_limit > 0 else 0
         m3.metric("Utilization", f"{util_pct:.2f}%")
         
-        # HTML Rendered Table for Stability
         res_df = pd.DataFrame(results)
-        st.write(res_df.to_html(index=False, escape=False, classes="dashboard-table"), unsafe_allow_html=True)
+        # Show table WITHOUT the hidden Plain_Status column
+        display_df = res_df.drop(columns=['Plain_Status'])
+        st.write(display_df.to_html(index=False, escape=False, classes="dashboard-table"), unsafe_allow_html=True)
         
         st.write("---")
-        # Verdict Alerts
-        if util_pct > 100:
-            st.error(f"⚠️ Over Capacity: {util_pct:.2f}% Utilization.")
-        else:
-            st.success(f"🟢 Healthy Plan: {util_pct:.2f}% Utilization.")
-
-        # Export Button - Clean logic
-        export_df = pd.DataFrame(results)
-        # Remove HTML tags from Exported CSV Status
-        export_df['Status'] = export_df['Status'].str.replace(r'<[^>]*>', '', regex=True)
-        csv_data = export_df.to_csv(index=False).encode('utf-8')
-        st.download_button("📤 EXPORT WEEKLY REPORT (CSV)", csv_data, "Weekly_QA_Plan.csv", "text/csv")
-else:
-    st.info("👋 Upload Mercury files to begin.")
+        
+        # CLEAN CSV EXPORT LOGIC
+        # We create a specific dataframe for export that doesn't have HTML tags
+        export_df = res_df.copy()
+        export_df['Status'] = export_df['Plain_Status']
+        export_df = export_df.drop(columns=['Plain_Status'])
+        
+        # utf-8-sig makes it open perfectly in Excel without weird characters
+        csv_data = export_df.to_csv(index=False).encode('utf-8-sig')
+        
+        st.download_button(
+            label="📥 Export Report",
+            data=csv_data,
+            file_name="QA_Weekly_Plan.csv",
+            mime="text/csv"
+        )
