@@ -17,6 +17,8 @@ st.markdown("""
         border-radius: 12px;
         padding: 20px;
     }
+    
+    /* Default Blue for Metrics */
     [data-testid="stMetricValue"] { color: #38bdf8 !important; font-size: 2rem !important; }
 
     /* Standard Sized Left-Aligned Blue Button */
@@ -119,26 +121,25 @@ if uploaded_files:
             total_hours_needed += total_h
             man_days = total_h / prod_h
             
-            # --- FIXED INDEPENDENT LOGIC ---
-            # Row only turns Critical if THIS SPECIFIC TASK exceeds team's weekly man-days
             is_row_critical = man_days > (qas * 5) 
             status_text = "Critical" if is_row_critical else "Safe"
             emoji = "🚨 " if is_row_critical else "✅ "
             status_class = "status-critical" if is_row_critical else "status-safe"
 
             results.append({
-                "Workflow": wf_name,
-                "AHT (Sec)": round(aht, 2),
-                "Volume": vol,
-                "Hours Needed": round(total_h, 2),
-                "Man-Days Needed": round(man_days, 2),
+                "Workflow": wf_name, "AHT (Sec)": round(aht, 2), "Volume": vol,
+                "Hours Needed": round(total_h, 2), "Man-Days Needed": round(man_days, 2),
                 "Status": f'<span class="{status_class}">{emoji}{status_text}</span>',
                 "Plain_Status": status_text
             })
 
         util_pct = (total_hours_needed / weekly_team_hours_limit * 100) if weekly_team_hours_limit > 0 else 0
 
-        # Summary Metrics Cards
+        # --- DYNAMIC METRIC COLORING ---
+        # If utilization is > 100%, the metric number itself turns Red
+        util_color = "#f87171" if util_pct > 100 else "#38bdf8"
+        st.markdown(f"<style>[data-testid='stMetricValue'] {{ color: {util_color} !important; }}</style>", unsafe_allow_html=True)
+
         m1, m2, m3 = st.columns(3)
         m1.metric("Total Hours Needed", f"{total_hours_needed:.2f}")
         m2.metric("Team Capacity (Wk)", f"{weekly_team_hours_limit:.2f}")
@@ -146,22 +147,17 @@ if uploaded_files:
 
         res_df = pd.DataFrame(results)
         st.write(res_df.drop(columns=['Plain_Status']).to_html(index=False, escape=False, classes="dashboard-table"), unsafe_allow_html=True)
-        
         st.write("") 
 
-        # --- OVERALL PLAN VERDICT BANNER ---
         if util_pct > 100:
             st.markdown(f'<div class="status-banner banner-error">⚠️ Over Capacity: Total utilization is {util_pct:.2f}%. Load is not balanced.</div>', unsafe_allow_html=True)
         else:
             st.markdown(f'<div class="status-banner banner-success">🟢 Healthy Plan: Total utilization is {util_pct:.2f}%. Team can handle this load.</div>', unsafe_allow_html=True)
             
-        # --- EXPORT BUTTON ---
         export_df = res_df.copy()
         export_df['Status'] = export_df['Plain_Status']
         export_df = export_df.drop(columns=['Plain_Status'])
         csv_data = export_df.to_csv(index=False).encode('utf-8-sig')
-        
         st.download_button(label="📥 Export Report", data=csv_data, file_name="Weekly_Plan.csv", mime="text/csv")
-
 else:
     st.info("👋 Upload Mercury files to begin.")
