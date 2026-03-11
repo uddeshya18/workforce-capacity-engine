@@ -24,7 +24,7 @@ st.markdown("""
         background-color: #0ea5e9 !important;
         color: white !important;
         border-radius: 8px !important;
-        width: 100%;
+        width: 100% !important;
         font-weight: bold !important;
         padding: 12px !important;
         border: none !important;
@@ -83,7 +83,7 @@ if uploaded_files:
     all_wfs = pd.DataFrame({'Mapped_WF': list(WF_MAPPING.values())}).drop_duplicates()
     final_metrics = all_wfs.merge(metrics, on='Mapped_WF', how='left').fillna(overall_avg)
 
-    st.divider()
+    st.markdown("---") # Replaced st.divider()
     col_sidebar, col_main = st.columns([1, 2.5])
     
     with col_sidebar:
@@ -139,8 +139,11 @@ if uploaded_files:
         else:
             st.success(f"🟢 Healthy Plan: {util_pct:.2f}% Utilization.")
 
-        # Export Button
-        csv_data = pd.DataFrame(results).to_csv(index=False).encode('utf-8')
+        # Export Button - Clean logic
+        export_df = pd.DataFrame(results)
+        # Remove HTML tags from Exported CSV Status
+        export_df['Status'] = export_df['Status'].str.replace(r'<[^>]*>', '', regex=True)
+        csv_data = export_df.to_csv(index=False).encode('utf-8')
         st.download_button("📤 EXPORT WEEKLY REPORT (CSV)", csv_data, "Weekly_QA_Plan.csv", "text/csv")
 else:
     st.info("👋 Upload Mercury files to begin.")
