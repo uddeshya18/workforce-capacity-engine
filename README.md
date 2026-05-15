@@ -1,5 +1,5 @@
 ---
-# Leave whatever original metadata configuration was up here exactly as it was
+
 ---
 
 ## 📦 Part of the Operations Excellence Suite
